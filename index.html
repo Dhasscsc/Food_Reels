@@ -95,7 +95,7 @@ main{max-width:720px;margin:6px auto;padding:8px 12px 0;}
 .modal-close{margin-left:auto;background:var(--cream-2);border:none;width:32px;height:32px;border-radius:50%;font-size:1rem;color:var(--grey);}
 .field{margin-bottom:13px;}
 label{display:block;font-size:.8rem;font-weight:700;color:var(--red-dark);margin-bottom:5px;}
-input[type=text],input[type=email],input[type=url],input[type=password],select{
+input[type=text],input[type=tel],input[type=email],input[type=url],input[type=password],select{
   width:100%;padding:12px 13px;border:1.5px solid var(--line);border-radius:11px;background:var(--white);font-size:.95rem;color:var(--ink);
 }
 input:focus,select:focus{outline:none;border-color:var(--gold);}
@@ -415,7 +415,7 @@ let videos = DB.load('videos', []);
 let admins = DB.load('admins', null);
 if(!admins || !admins.length){
   const legacyAdmin = DB.load('admin', null); // migrate older single-admin installs
-  admins = legacyAdmin ? [legacyAdmin] : [{username:'admin', password:'food2026'}];
+  admins = legacyAdmin ? [legacyAdmin] : [{username:'Dhass', password:'Dhass@9950'}];
   DB.save('admins', admins);
 }
 let blocked = DB.load('blocked', []);
@@ -431,6 +431,11 @@ let activeCat = 'all';
 let addingAsAdmin = false;
 let pendingUserName = '', pendingUserPhone = '', pendingUserTown = '';
 
+function fixOldDefaultAdmin(){
+  let changed=false;
+  admins = admins.map(a=>{ if(a && a.username==='admin' && a.password==='food2026'){ changed=true; return {username:'Dhass', password:'Dhass@9950'}; } return a; });
+  if(changed){ try{ DB.save('admins', admins); if(settings && settings.webhook) syncAdminsToSheet(); }catch(e){} }
+}
 function persistAll(){ DB.save('categories', categories); DB.save('videos', videos); DB.save('admins', admins); DB.save('blocked', blocked); DB.save('visitors', visitors); DB.save('settings', settings); }
 function videoOrder(v){ return (typeof v.order === 'number' && !isNaN(v.order)) ? v.order : (v.ts||0); }
 function isBlocked(phone){ return blocked.some(b=>b.phone===phone); }
@@ -813,6 +818,7 @@ function moveVideo(id, dir){
   syncVideosToSheet();
 }
 function deleteVideo(id){
+  try{ DB.save('pendingVideos', DB.load('pendingVideos',[]).filter(r=>r.id!==id)); }catch(e){}
   if(!confirm('இந்த வீடியோவை நீக்கவா?')) return;
   videos = videos.filter(v=>v.id!==id);
   persistAll(); renderAdminVideoList(); renderAdminCatList(); renderCatBar(); renderGrid();
@@ -1177,6 +1183,7 @@ function manualSync(){
   fetchAllFromSheet(false, true);
 }
 function pushNewVideoRemote(rec){
+  try{ const pv=DB.load('pendingVideos',[]); if(!pv.find(x=>x.id===rec.id)){ pv.push(rec); DB.save('pendingVideos',pv); } }catch(e){}
   if(!settings.webhook) return;
   fetch(settings.webhook, {
     method:'POST', mode:'no-cors',
@@ -1231,7 +1238,19 @@ async function fetchAllFromSheet(silent, manual){
     const data = await res.json();
     if(data){
       if(Array.isArray(data.categories) && data.categories.length) categories = data.categories;
-      if(Array.isArray(data.videos)) videos = data.videos;
+      if(Array.isArray(data.videos)){
+        videos = data.videos;
+        let pv = DB.load('pendingVideos',[]);
+        const ids = new Set(videos.map(v=>v.id));
+        pv = pv.filter(r=>!ids.has(r.id));
+        pv.forEach(r=>{
+          videos.push(r);
+          if(Date.now()-(r.ts||0) > 60000){
+            fetch(settings.webhook,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'video_new',video:r})}).catch(()=>{});
+          }
+        });
+        DB.save('pendingVideos',pv);
+      }
       if(Array.isArray(data.admins) && data.admins.length){
         admins = data.admins;
       } else {
@@ -1239,6 +1258,7 @@ async function fetchAllFromSheet(silent, manual){
         // so future logins/recoveries from any device can read them back.
         syncAdminsToSheet();
       }
+      fixOldDefaultAdmin();
       if(Array.isArray(data.blocked)) blocked = data.blocked;
       if(Array.isArray(data.visitors)) visitors = data.visitors;
       persistAll();
