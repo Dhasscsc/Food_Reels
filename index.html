@@ -399,8 +399,24 @@ input:focus,select:focus{outline:none;border-color:var(--gold);}
 <script>
 /* ================= Storage ================= */
 const DB = {
-  load(k, d){ try{ const v = localStorage.getItem('foodr_'+k); return v===null ? d : JSON.parse(v); }catch(e){ return d; } },
-  save(k, v){ localStorage.setItem('foodr_'+k, JSON.stringify(v)); }
+  mem:{}, warned:false,
+  load(k, d){
+    if(k in this.mem) return this.mem[k];
+    try{ const v = localStorage.getItem('foodr_'+k); return v===null ? d : JSON.parse(v); }catch(e){ return d; }
+  },
+  save(k, v){
+    this.mem[k] = v;
+    const key = 'foodr_'+k;
+    let str; try{ str = JSON.stringify(v); }catch(e){ return false; }
+    try{ localStorage.setItem(key, str); return true; }catch(e){}
+    // Storage full (the quota is shared by every tool on this site) - free this app's own caches and retry
+    try{
+      ['foodr_visitors','foodr_blocked','foodr_pendingVideos'].forEach(x=>{ if(x!==key) localStorage.removeItem(x); });
+      localStorage.setItem(key, str); return true;
+    }catch(e){}
+    if(!this.warned){ this.warned=true; setTimeout(()=>{ try{ toast('⚠️ உலாவி சேமிப்பு நிரம்பியுள்ளது — தரவு Cloud-ல் சேமிக்கப்படும்'); }catch(e){} },300); }
+    return false;
+  }
 };
 
 // 👉 எல்லா சாதனங்களிலும் தானாக Sync ஆக வேண்டுமெனில், உங்கள் Google Apps Script
